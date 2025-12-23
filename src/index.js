@@ -312,55 +312,93 @@ async function handleConvert(request, env, corsHeaders) {
       return new Response(JSON.stringify({ error: '文件不存在' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     const zipData = await object.arrayBuffer();
+    const zipBytes = new Uint8Array(zipData);
     let files = null;
     let usedPassword = null;
 
     // 尝试解压
     try {
       files = await new Promise((resolve, reject) => {
-        unzip(new Uint8Array(zipData), (err, result) => {
+        unzip(zipBytes, (err, result) => {
           if (err) reject(err);
           else resolve(result);
         });
       });
+      console.log('无密码解压成功');
     } catch (e) {
-      // 需要密码
+      console.log('需要密码，开始尝试...');
+      // 先尝试用户密码
       if (customPassword) {
         try {
-          files = unzipSync(new Uint8Array(zipData), { password: new TextEncoder().encode(customPassword) });
+          files = unzipSync(zipBytes, { password: new TextEncoder().encode(customPassword) });
           usedPassword = customPassword;
-        } catch (e2) { /* 继续尝试 */ }
+          console.log('用户密码成功');
+        } catch (e2) { console.log('用户密码失败'); }
       }
+      // 尝试常用密码（限制100个最常用的，避免超时）
       if (!files) {
-        for (let i = 0; i < COMMON_PASSWORDS.length; i++) {
+        const maxTry = Math.min(COMMON_PASSWORDS.length, 100);
+        for (let i = 0; i < maxTry; i++) {
           try {
-            files = unzipSync(new Uint8Array(zipData), { password: new TextEncoder().encode(COMMON_PASSWORDS[i]) });
+            files = unzipSync(zipBytes, { password: new TextEncoder().encode(COMMON_PASSWORDS[i]) });
             usedPassword = COMMON_PASSWORDS[i];
+            console.log('密码成功: ' + usedPassword);
             break;
           } catch (e3) { continue; }
         }
       }
       if (!files) {
-        return new Response(JSON.stringify({ error: '无法解压，密码不在列表中', needPassword: true }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({
+          error: '无法解压，密码不在常用列表中（已尝试100个）',
+          needPassword: true,
+          hint: '请手动输入密码'
+        }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
     }
 
     // 提取图片（支持子文件夹）
     const imageFiles = [];
     let cover = null, backCover = null, hasCover = false;
+    let totalFiles = 0;
+
     for (const [fullPath, data] of Object.entries(files)) {
+      totalFiles++;
+      // 跳过空数据和目录
       if (!data || data.length === 0) continue;
+
       const lp = fullPath.toLowerCase();
-      if (!(lp.endsWith('.pdg') || lp.endsWith('.jpg') || lp.endsWith('.jpeg') || lp.endsWith('.png') || lp.endsWith('.bmp') || lp.endsWith('.tif') || lp.endsWith('.tiff') || lp.endsWith('.gif'))) continue;
+      const isImage = lp.endsWith('.pdg') || lp.endsWith('.jpg') || lp.endsWith('.jpeg') ||
+        lp.endsWith('.png') || lp.endsWith('.bmp') || lp.endsWith('.tif') ||
+        lp.endsWith('.tiff') || lp.endsWith('.gif');
+      if (!isImage) continue;
+
+      // 提取纯文件名
       const fname = fullPath.split(/[/\\]/).pop().toLowerCase();
-      if (fname.includes('cov001')) { cover = { filename: fullPath, data }; hasCover = true; }
-      else if (fname.includes('cov002')) { backCover = { filename: fullPath, data }; hasCover = true; }
-      else { imageFiles.push({ filename: fullPath, data }); }
+
+      if (fname.includes('cov001') || fname.startsWith('cov001')) {
+        cover = { filename: fullPath, data };
+        hasCover = true;
+      } else if (fname.includes('cov002') || fname.startsWith('cov002')) {
+        backCover = { filename: fullPath, data };
+        hasCover = true;
+      } else {
+        imageFiles.push({ filename: fullPath, data });
+      }
     }
+
+    console.log('ZIP内总文件数: ' + totalFiles + ', 图片数: ' + imageFiles.length);
+
     if (imageFiles.length === 0 && !cover && !backCover) {
-      return new Response(JSON.stringify({ error: 'ZIP中无图片' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({
+        error: 'ZIP中没有找到图片文件',
+        hint: '支持格式: PDG, JPG, PNG, BMP, TIF, GIF',
+        totalFiles: totalFiles
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+
+    // 自然排序
     imageFiles.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true }));
+
     const finalFiles = [];
     if (cover) finalFiles.push(cover);
     finalFiles.push(...imageFiles);
@@ -368,23 +406,56 @@ async function handleConvert(request, env, corsHeaders) {
 
     // 生成PDF
     const pdfDoc = await PDFDocument.create();
+    let successCount = 0;
+
     for (const { filename, data } of finalFiles) {
       try {
         let img;
         const ln = filename.toLowerCase();
-        if (ln.endsWith('.png')) { img = await pdfDoc.embedPng(data); }
-        else { try { img = await pdfDoc.embedJpg(data); } catch { try { img = await pdfDoc.embedPng(data); } catch { continue; } } }
+        if (ln.endsWith('.png')) {
+          img = await pdfDoc.embedPng(data);
+        } else {
+          try {
+            img = await pdfDoc.embedJpg(data);
+          } catch {
+            try {
+              img = await pdfDoc.embedPng(data);
+            } catch {
+              console.log('跳过无法识别的文件: ' + filename);
+              continue;
+            }
+          }
+        }
         const page = pdfDoc.addPage([img.width, img.height]);
         page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
-      } catch (e) { continue; }
+        successCount++;
+      } catch (e) {
+        console.log('处理失败: ' + filename);
+        continue;
+      }
     }
+
+    if (successCount === 0) {
+      return new Response(JSON.stringify({ error: '没有成功处理任何图片' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const pdfBytes = await pdfDoc.save();
     const pdfKey = key.replace('uploads/', 'pdfs/').replace(/\.(zip|uvz|cbz)$/i, '.pdf');
     const expiresAt = new Date(Date.now() + 86400000);
     await env.BUCKET.put(pdfKey, pdfBytes, { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { expiresAt: expiresAt.toISOString() } });
-    return new Response(JSON.stringify({ success: true, pdfKey, pages: finalFiles.length, hasPassword: !!usedPassword, password: usedPassword, hasCover, expiresIn: '24小时' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    return new Response(JSON.stringify({
+      success: true,
+      pdfKey,
+      pages: successCount,
+      hasPassword: !!usedPassword,
+      password: usedPassword,
+      hasCover,
+      expiresIn: '24小时'
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    console.error('转换错误:', error);
+    return new Response(JSON.stringify({ error: error.message || '转换过程出错' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 }
 
