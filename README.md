@@ -84,7 +84,7 @@ npm run deploy
 - 常用密码：10-20秒
 - 全部尝试：40-60秒
 
-详细说明请查看 [密码破解功能.md](./密码破解功能.md)
+详细说明请查看 [密码破解功能.md](./docs/密码破解功能.md)
 
 ## 📖 使用方法
 
@@ -171,13 +171,13 @@ duxiu-zip2pdf-worker/
 
 | 文档 | 说明 |
 |------|------|
-| [使用说明.md](./使用说明.md) | 中文快速开始指南 |
-| [密码破解功能.md](./密码破解功能.md) | 密码功能详细说明 |
-| [QUICKSTART.md](./QUICKSTART.md) | 5分钟快速部署 |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | 详细部署指南 |
-| [DEVELOPMENT.md](./DEVELOPMENT.md) | 开发者文档 |
-| [EXAMPLES.md](./EXAMPLES.md) | 使用示例代码 |
-| [PASSWORD_FEATURES.md](./PASSWORD_FEATURES.md) | 密码功能技术文档 |
+| [使用说明.md](./docs/使用说明.md) | 中文快速开始指南 |
+| [密码破解功能.md](./docs/密码破解功能.md) | 密码功能详细说明 |
+| [QUICKSTART.md](./docs/QUICKSTART.md) | 5分钟快速部署 |
+| [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | 详细部署指南 |
+| [DEVELOPMENT.md](./docs/DEVELOPMENT.md) | 开发者文档 |
+| [EXAMPLES.md](./docs/EXAMPLES.md) | 使用示例代码 |
+| [PASSWORD_FEATURES.md](./docs/PASSWORD_FEATURES.md) | 密码功能技术文档 |
 
 ## 💡 使用示例
 
@@ -210,7 +210,7 @@ def convert_zip_to_pdf(zip_path, pdf_path):
 convert_zip_to_pdf('book.zip', 'book.pdf')
 \`\`\`
 
-更多示例请查看 [EXAMPLES.md](./EXAMPLES.md)
+更多示例请查看 [EXAMPLES.md](./docs/EXAMPLES.md)
 
 ## ⚠️ 注意事项
 
